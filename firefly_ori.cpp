@@ -5,7 +5,6 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
-#include <omp.h>
 #include <random>
 #include <vector>
 
@@ -21,19 +20,19 @@ class FA {
         // nvtxRangePop();
     }
 
-    void fun(const vector<vector<double>> &pop, vector<double> &result) {
+    vector<double> fun(const vector<vector<double>> &pop) {
         // nvtxRangePushA("fun() calculate fitness");
-        int n = pop.size();
-        result.assign(n, 10 * D);
-#pragma omp parallel for collapse(2)
-        for (int i = 0; i < n; i++) {
+        vector<double> result;
+        for (int i = 0; i < pop.size(); i++) {
+            double funsum = 0;
             for (int j = 0; j < D; j++) {
                 double x = pop[i][j];
-                double tmp = x * x - 10 * cos(2 * M_PI * x);
-#pragma omp atomic
-                result[i] += tmp;
+                funsum += x * x - 10 * cos(2 * M_PI * x);
             }
+            funsum += 10 * D;
+            result.push_back(funsum);
         }
+        return result;
         // nvtxRangePop();
     }
 
@@ -56,6 +55,7 @@ int main() {
     auto start_time = chrono::high_resolution_clock::now();
 
     random_device rd;
+    // mt19937 gen(rd()); //
     mt19937 gen(0); //
     uniform_real_distribution<> dis(-100, 100);
 
@@ -70,8 +70,7 @@ int main() {
     }
     // nvtxRangePop();
 
-    vector<double> fitness;
-    fa.fun(pop, fitness);
+    vector<double> fitness = fa.fun(pop);
 
     vector<double> best_list;
     vector<vector<double>> best_para_list;
@@ -104,7 +103,7 @@ int main() {
         }
 
         // Update fitness after each iteration
-        fa.fun(pop, fitness);
+        fitness = fa.fun(pop);
 
         // nvtxRangePushA("update best fitness");
         auto best_iter = min_element(fitness.begin(), fitness.end());
@@ -117,7 +116,7 @@ int main() {
     }
 
     // nvtxRangePushA("write result file");
-    ofstream file("best_value_plot_test.txt");
+    ofstream file("best_value_plot.txt");
     if (file.is_open()) {
         for (int i = 0; i < best_list.size(); i++) {
             file << i << " " << best_list[i] << "\n";
