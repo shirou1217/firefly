@@ -83,6 +83,7 @@ int main() {
 
     int it = 1;
     while (it < fa.it) {
+#pragma omp parallel for collapse(2)
         for (int i = 0; i < fa.N; i++) {
             for (int j = 0; j < fa.D; j++) {
                 double steps = fa.A * (dis(gen) / 100.0 - 0.5) * abs(fa.Ub[0] - fa.Lb[0]);
