@@ -6,24 +6,23 @@
 #include <limits>
 #include <fstream>
 #include <chrono>
-#include "/home/pp24/pp24s036/firefly/NVTX/c/include/nvtx3/nvtx3.hpp"
+// #include "nvtx3/nvtx3.hpp"
 
 
 using namespace std;
 
 class FA {
 public:
-    
+
     FA(int dimen, int population, int max_iter)
         : D(dimen), N(population), it(max_iter), A(0.97), B(1.0), G(0.0001) {
-        //nvtxRangePushA("FA() initialize parameter");
+        //NVTX3_FUNC_RANGE();  // Range around the whole function
         Ub.resize(D, 3.0);
         Lb.resize(D, 0.0);
-        //nvtxRangePop();
     }
-    
+
     vector<double> fun(const vector<vector<double>>& pop) {
-        //nvtxRangePushA("fun() calculate fitness");
+        //NVTX3_FUNC_RANGE();  // Range around the whole function
         vector<double> result;
         for (int i = 0; i < pop.size(); i++) {
             double funsum = 0;
@@ -35,7 +34,6 @@ public:
             result.push_back(funsum);
         }
         return result;
-        //nvtxRangePop();
     }
 
 
@@ -51,30 +49,29 @@ public:
 
 int main() {
     int dimen, population, max_iter;
-    cout << "Enter dimension, population, and max iterations: ";
-    cin >> dimen >> population >> max_iter;
 
     auto start_time = chrono::high_resolution_clock::now();
 
     random_device rd;
     mt19937 gen(rd()); //
-    uniform_real_distribution<> dis(-100, 100);
+    uniform_real_distribution<> dis(-50, 50);
+    uniform_real_distribution<> step_dis(0, 1);
 
-    FA fa(dimen, population, max_iter);
+    FA fa(50, 50, 5);
     vector<vector<double>> pop(fa.N, vector<double>(fa.D));
-    
-   
-    //nvtxRangePushA("pop initialize");
-    for (int i = 0; i < fa.N; i++) {
-        for (int j = 0; j < fa.D; j++) {
-            pop[i][j] = dis(gen);
+
+
+    {
+        //nvtx3::scoped_range scope{"Init pop"};  // Range for a scope
+        for (int i = 0; i < fa.N; i++) {
+            for (int j = 0; j < fa.D; j++) {
+                pop[i][j] = dis(gen);
+            }
         }
     }
-    //nvtxRangePop();
 
 
     vector<double> fitness = fa.fun(pop);
-
     vector<double> best_list;
     vector<vector<double>> best_para_list;
 
@@ -82,16 +79,23 @@ int main() {
     best_list.push_back(*min_iter);
     int arr = distance(fitness.begin(), min_iter);
     best_para_list.push_back(pop[arr]);
+    double best_iter;
+    int best_index;
 
+    double r_distance = 0;
+    double best_ = std::numeric_limits<double>::max(); // Initialize to a large value
+    vector<double> best_para_(fa.D); // Initialize with the correct dimension
     int it = 1;
     while (it < fa.it) {
+        // Scoped_range can support a color if you want
+        //nvtx3::scoped_range scope_it{"iter = " + std::to_string(it), //nvtx3::rgb{255,218,185}};
         for (int i = 0; i < fa.N; i++) {
+            //nvtx3::scoped_range scope_i{"i = " + std::to_string(i)};  // Range for a scope
             for (int j = 0; j < fa.D; j++) {
-                double steps = fa.A * (dis(gen) / 100.0 - 0.5) * abs(fa.Ub[0] - fa.Lb[0]);
-                double r_distance = 0;
-
+                //nvtx3::scoped_range scope_j{"j = " + std::to_string(j)};  // Range for a scope
+                double steps = fa.A * (step_dis(gen) - 0.5) * abs(fa.Ub[0] - fa.Lb[0]);
                 for (int k = 0; k < fa.N; k++) {
-                   //nvtxRangePushA("update firefly position");
+                    //nvtx3::scoped_range scope_k{"k = " + std::to_string(k)};  // Range for a scope
                     if (fitness[i] > fitness[k]) {
                         r_distance += pow(pop[i][j] - pop[k][j], 2);
                         double Beta = fa.B * exp(-fa.G * r_distance);
@@ -99,37 +103,53 @@ int main() {
 
                         xnew = min(max(xnew, fa.Lb[0]), fa.Ub[0]);
                         pop[i][j] = xnew;
+                        // Update fitness after each iteration
+                        fitness = fa.fun(pop);
+                        auto best_iter = min_element(fitness.begin(), fitness.end());
+                        best_ = *best_iter;
+                        int arr_ = distance(fitness.begin(), best_iter);
+                        best_para_ = pop[arr_];
                     }
-                    //nvtxRangePop();
-
                 }
             }
         }
-        
-        // Update fitness after each iteration
-        fitness = fa.fun(pop);
-
-        //nvtxRangePushA("update best fitness");
-        auto best_iter = min_element(fitness.begin(), fitness.end());
-        best_list.push_back(*best_iter);
-        int best_index = distance(fitness.begin(), best_iter);
-        best_para_list.push_back(pop[best_index]);
-        //nvtxRangePop();
-
-
+        best_list.push_back(best_);
+        best_para_list.push_back(best_para_);
         it++;
+        cout<<"iteration"<<it<<" finished"<<"\n";
     }
 
     //nvtxRangePushA("write result file");
-    ofstream file("best_value_plot.txt");
+    ofstream file("results_cpp.csv");
     if (file.is_open()) {
-        for (int i = 0; i < best_list.size(); i++) {
-            file << i << " " << best_list[i] << "\n";
+        // Write the header
+        file << "Dimension_1";
+        for (int d = 1; d < fa.D; ++d) {
+            file << ",Dimension_" << d + 1;
+        }
+        file << ",Fitness\n";
+
+        // Write the population matrix and corresponding fitness values
+        for (int i = 0; i < pop.size(); ++i) {
+            for (int j = 0; j < pop[i].size(); ++j) {
+                file << pop[i][j];
+                if (j < pop[i].size() - 1) {
+                    file << ",";
+                }
+            }
+            file << "," << fitness[i] << "\n"; // Append fitness value after the row
+        }
+
+        // Write best fitness values per generation
+        file << "\nGeneration,Best Fitness\n";
+        for (int i = 0; i < best_list.size(); ++i) {
+            file << i << "," << best_list[i] << "\n";
         }
         file.close();
+        cout << "Results saved to results_cpp.csv" << endl;
     }
     //nvtxRangePop();
-    
+
     auto end_time = chrono::high_resolution_clock::now();
     chrono::duration<double> elapsed_time = end_time - start_time;
     cout << "Program execution time: " << elapsed_time.count() << " seconds" << endl;
