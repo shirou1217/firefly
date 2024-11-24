@@ -13,16 +13,17 @@ using namespace std;
 
 class FA {
 public:
-
+    
     FA(int dimen, int population, int max_iter)
         : D(dimen), N(population), it(max_iter), A(0.97), B(1.0), G(0.0001) {
-        //NVTX3_FUNC_RANGE();  // Range around the whole function
+        //nvtxRangePushA("FA() initialize parameter");
         Ub.resize(D, 3.0);
         Lb.resize(D, 0.0);
+        //nvtxRangePop();
     }
-
+    
     vector<double> fun(const vector<vector<double>>& pop) {
-        //NVTX3_FUNC_RANGE();  // Range around the whole function
+        //nvtxRangePushA("fun() calculate fitness");
         vector<double> result;
         for (int i = 0; i < pop.size(); i++) {
             double funsum = 0;
@@ -33,6 +34,7 @@ public:
             funsum += 10 * D;
             result.push_back(funsum);
         }
+        //nvtxRangePop();
         return result;
     }
 
@@ -53,25 +55,25 @@ int main() {
     auto start_time = chrono::high_resolution_clock::now();
 
     random_device rd;
-    mt19937 gen(rd()); //
-    uniform_real_distribution<> dis(-50, 50);
+    mt19937 gen(0); //rd()
+    uniform_real_distribution<> dis(-1024, 1024);
     uniform_real_distribution<> step_dis(0, 1);
 
-    FA fa(50, 50, 5);
+    FA fa(1024, 5, 5);
     vector<vector<double>> pop(fa.N, vector<double>(fa.D));
-
-
-    {
-        //nvtx3::scoped_range scope{"Init pop"};  // Range for a scope
-        for (int i = 0; i < fa.N; i++) {
-            for (int j = 0; j < fa.D; j++) {
-                pop[i][j] = dis(gen);
-            }
+    
+   
+    //nvtxRangePushA("pop initialize");
+    for (int i = 0; i < fa.N; i++) {
+        for (int j = 0; j < fa.D; j++) {
+            pop[i][j] = dis(gen);
         }
     }
+    //nvtxRangePop();
 
 
     vector<double> fitness = fa.fun(pop);
+
     vector<double> best_list;
     vector<vector<double>> best_para_list;
 
@@ -81,21 +83,17 @@ int main() {
     best_para_list.push_back(pop[arr]);
     double best_iter;
     int best_index;
-
+    
     double r_distance = 0;
     double best_ = std::numeric_limits<double>::max(); // Initialize to a large value
     vector<double> best_para_(fa.D); // Initialize with the correct dimension
     int it = 1;
-    while (it < fa.it) {
-        // Scoped_range can support a color if you want
-        //nvtx3::scoped_range scope_it{"iter = " + std::to_string(it), //nvtx3::rgb{255,218,185}};
+    while (it < fa.it) {    
         for (int i = 0; i < fa.N; i++) {
-            //nvtx3::scoped_range scope_i{"i = " + std::to_string(i)};  // Range for a scope
             for (int j = 0; j < fa.D; j++) {
-                //nvtx3::scoped_range scope_j{"j = " + std::to_string(j)};  // Range for a scope
-                double steps = fa.A * (step_dis(gen) - 0.5) * abs(fa.Ub[0] - fa.Lb[0]);
+                double steps = fa.A * (dis(gen) - 0.5) * abs(fa.Ub[0] - fa.Lb[0]); //step_dis(gen)
                 for (int k = 0; k < fa.N; k++) {
-                    //nvtx3::scoped_range scope_k{"k = " + std::to_string(k)};  // Range for a scope
+                   //nvtxRangePushA("update firefly position & fitness");
                     if (fitness[i] > fitness[k]) {
                         r_distance += pow(pop[i][j] - pop[k][j], 2);
                         double Beta = fa.B * exp(-fa.G * r_distance);
@@ -110,6 +108,7 @@ int main() {
                         int arr_ = distance(fitness.begin(), best_iter);
                         best_para_ = pop[arr_];
                     }
+                    //nvtxRangePop();
                 }
             }
         }
@@ -117,6 +116,7 @@ int main() {
         best_para_list.push_back(best_para_);
         it++;
         cout<<"iteration"<<it<<" finished"<<"\n";
+
     }
 
     //nvtxRangePushA("write result file");
@@ -147,9 +147,9 @@ int main() {
         }
         file.close();
         cout << "Results saved to results_cpp.csv" << endl;
-    }
+    } 
     //nvtxRangePop();
-
+    
     auto end_time = chrono::high_resolution_clock::now();
     chrono::duration<double> elapsed_time = end_time - start_time;
     cout << "Program execution time: " << elapsed_time.count() << " seconds" << endl;
