@@ -1,3 +1,3 @@
-g++ -O3 -fopenmp ./firefly.cpp -o firefly
-srun -n1 -c4 ./firefly
-diff best_value_plot.txt best_value_plot_test.txt
+icpc -O3 -qopenmp -ftree-vectorize ./firefly_1D_omp.cpp -o 1D
+# g++ -O3 -fopenmp -ftree-vectorize ./firefly_1D.cpp -o 1D
+srun -n1 -c12 ./1D
