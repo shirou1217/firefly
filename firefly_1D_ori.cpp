@@ -1,11 +1,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <emmintrin.h>
 #include <fstream>
 #include <iostream>
 #include <limits>
-#include <omp.h>
 #include <random>
 #include <vector>
 // #include "/home/pp24/pp24s036/firefly/NVTX/c/include/nvtx3/nvtx3.hpp"
@@ -22,16 +20,21 @@ class FA {
         // nvtxRangePop();
     }
 
-    void fun(const vector<double> &pop, vector<double> &result) {
-        result.assign(N, 10 * D);
+    vector<double> fun(const vector<double> &pop) {
+        vector<double> result(N); // Fitness results for each individual in the population
 
-#pragma omp parallel for collapse(2)
         for (int i = 0; i < N; i++) {
+            double funsum = 0.0;
             for (int j = 0; j < D; j++) {
                 double x = pop[i * D + j]; // Access the element using linear indexing
-                result[i] += x * x - 10 * cos(2 * M_PI * x);
+                funsum += x * x - 10 * cos(2 * M_PI * x);
             }
+            funsum += 10 * D;   // Add constant term
+            result[i] = funsum; // Store the fitness value
+            // printf("Population[%d]: Fitness = %f\n", i, funsum);
         }
+
+        return result;
     }
 
     int D;             // Dimension of problems
@@ -63,8 +66,7 @@ int main() {
         }
     }
 
-    vector<double> fitness;
-    fa.fun(pop, fitness);
+    vector<double> fitness = fa.fun(pop);
 
     vector<double> best_list;
     vector<vector<double>> best_para_list;
@@ -91,7 +93,6 @@ int main() {
                 double steps = fa.A * (dis(gen) - 0.5) * abs(fa.Ub[0] - fa.Lb[0]);
                 double r_distance = 0;
 
-                // #pragma omp parallel for
                 for (int k = 0; k < fa.N; k++) {
                     if (fitness[i] > fitness[k]) {
                         r_distance += pow(pop[i * fa.D + j] - pop[k * fa.D + j], 2);
@@ -102,7 +103,7 @@ int main() {
                         pop[i * fa.D + j] = xnew;
 
                         // Update fitness after position update
-                        fa.fun(pop, fitness);
+                        fitness = fa.fun(pop);
                         auto best_iter = min_element(fitness.begin(), fitness.end());
                         best_ = *best_iter;
                         int arr_ = distance(fitness.begin(), best_iter);
@@ -121,7 +122,7 @@ int main() {
     }
 
     // Save results to file
-    ofstream file("results_1D_omp.csv");
+    ofstream file("results_1D.csv");
     if (file.is_open()) {
         // Write header
         file << "Dimension_1";
@@ -147,7 +148,7 @@ int main() {
             file << i << "," << best_list[i] << "\n";
         }
         file.close();
-        cout << "Results saved to results_1D_omp" << endl;
+        cout << "Results saved to results_1D" << endl;
     }
 
     auto end_time = chrono::high_resolution_clock::now();
