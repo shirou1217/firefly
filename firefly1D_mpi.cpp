@@ -33,6 +33,16 @@ class FA {
     }
 
     void fun(double *pop, double *result, int &size, int &rank) {
+        if (size == 1) {
+            for (int i = 0; i < N; i++) {
+                result[i] = 10 * D;
+                for (int j = 0; j < D; j++) {
+                    double x = pop[i * D + j]; // Access the element using linear indexing
+                    result[i] += x * x - 10 * cos(2 * M_PI * x);
+                }
+            }
+            return;
+        }
         if (rank == 0) {
             MPI_Request request;
             MPI_Ibcast(&rank, 1, MPI_INT, 0, MPI_COMM_WORLD, &request);
@@ -93,7 +103,7 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     int dimen, population, max_iter;
-    FA fa(256, 32, 5, size);
+    FA fa(1024, 128, 5, size);
     double *pop, *fitness;
     int N = fa.N, D = fa.D;
     pop = (double *)malloc(N * D * sizeof(double));
@@ -147,7 +157,7 @@ int main(int argc, char **argv) {
 
         int it = 1;
         while (it < fa.it) {
-            for (int i = 0; i < fa.N; i++) {
+            for (int i = 0; i < 10; i++) {
                 for (int j = 0; j < fa.D; j++) {
                     double steps = fa.A * (dis(gen) - 0.5) * abs(fa.Ub[0] - fa.Lb[0]);
                     double r_distance = 0;
@@ -179,7 +189,7 @@ int main(int argc, char **argv) {
             best_list.push_back(best_);
             best_para_list.push_back(best_para_);
             it++;
-            cout << "Iteration " << it << " finished" << endl;
+            // cout << "Iteration " << it << " finished" << endl;
         }
         int tmp = -1;
         // MPI_Bcast(&tmp, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -215,14 +225,15 @@ int main(int argc, char **argv) {
                 file << i << "," << best_list[i] << "\n";
             }
             file.close();
-            cout << "Results saved to " << file_name << endl;
+            // cout << "Results saved to " << file_name << endl;
         }
     }
     MPI_Finalize();
     if (rank == 0) {
         auto end_time = chrono::high_resolution_clock::now();
         chrono::duration<double> elapsed_time = end_time - start_time;
-        cout << "Program execution time: " << elapsed_time.count() << " seconds" << endl;
+        // cout << "Program execution time: " << elapsed_time.count() << " seconds" << endl;
+        cout << elapsed_time.count() << endl;
     }
 
     return 0;

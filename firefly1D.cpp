@@ -56,7 +56,8 @@ int main() {
     mt19937 gen(0); // rd()
     uniform_real_distribution<> dis(-1024, 1024);
 
-    FA fa(256, 32, 5);
+    // FA fa(256, 32, 5);
+    FA fa(1024, 128, 5);
     vector<double> pop(fa.N * fa.D); // 1D array for population
 
     // Initialize population
@@ -88,7 +89,7 @@ int main() {
 
     int it = 1;
     while (it < fa.it) {
-        for (int i = 0; i < fa.N; i++) {
+        for (int i = 0; i < 10; i++) {
             for (int j = 0; j < fa.D; j++) {
                 double steps = fa.A * (dis(gen) - 0.5) * abs(fa.Ub[0] - fa.Lb[0]);
                 double r_distance = 0;
@@ -122,7 +123,7 @@ int main() {
     }
 
     // Save results to file
-    ofstream file("results_1D.csv");
+    ofstream file("results_1024.csv");
     if (file.is_open()) {
         // Write header
         file << "Dimension_1";
