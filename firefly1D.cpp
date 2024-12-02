@@ -1,28 +1,26 @@
-#include <iostream>
-#include <vector>
-#include <cmath>
 #include <algorithm>
-#include <random>
-#include <limits>
-#include <fstream>
 #include <chrono>
+#include <cmath>
+#include <fstream>
+#include <iostream>
+#include <limits>
+#include <random>
+#include <vector>
 // #include "/home/pp24/pp24s036/firefly/NVTX/c/include/nvtx3/nvtx3.hpp"
-
 
 using namespace std;
 
 class FA {
-public:
-    
+  public:
     FA(int dimen, int population, int max_iter)
         : D(dimen), N(population), it(max_iter), A(0.97), B(1.0), G(0.0001) {
-        //nvtxRangePushA("FA() initialize parameter");
+        // nvtxRangePushA("FA() initialize parameter");
         Ub.resize(D, 3.0);
         Lb.resize(D, 0.0);
-        //nvtxRangePop();
+        // nvtxRangePop();
     }
-    
-    vector<double> fun(const vector<double>& pop) {
+
+    vector<double> fun(const vector<double> &pop) {
         vector<double> result(N); // Fitness results for each individual in the population
 
         for (int i = 0; i < N; i++) {
@@ -31,26 +29,23 @@ public:
                 double x = pop[i * D + j]; // Access the element using linear indexing
                 funsum += x * x - 10 * cos(2 * M_PI * x);
             }
-            funsum += 10 * D; // Add constant term
+            funsum += 10 * D;   // Add constant term
             result[i] = funsum; // Store the fitness value
-            //printf("Population[%d]: Fitness = %f\n", i, funsum);
+            // printf("Population[%d]: Fitness = %f\n", i, funsum);
         }
 
         return result;
     }
 
-
-
-    int D;                  // Dimension of problems
-    int N;                  // Population size
-    int it;                 // Max iteration
-    vector<double> Ub;      // Upper bound
-    vector<double> Lb;      // Lower bound
-    double A;               // Strength
-    double B;               // Attractiveness constant
-    double G;               // Absorption coefficient
+    int D;             // Dimension of problems
+    int N;             // Population size
+    int it;            // Max iteration
+    vector<double> Ub; // Upper bound
+    vector<double> Lb; // Lower bound
+    double A;          // Strength
+    double B;          // Attractiveness constant
+    double G;          // Absorption coefficient
 };
-
 
 int main() {
     int dimen, population, max_iter;
@@ -61,9 +56,9 @@ int main() {
     mt19937 gen(0); // rd()
     uniform_real_distribution<> dis(-1024, 1024);
 
-    FA fa(1024, 32, 5);
+    FA fa(256, 32, 5);
     vector<double> pop(fa.N * fa.D); // 1D array for population
-    
+
     // Initialize population
     for (int i = 0; i < fa.N; i++) {
         for (int j = 0; j < fa.D; j++) {
