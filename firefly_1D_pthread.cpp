@@ -1,16 +1,58 @@
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <emmintrin.h>
 #include <fstream>
 #include <iostream>
 #include <limits>
-#include <omp.h>
+#include <pthread.h>
 #include <random>
 #include <vector>
 // #include "/home/pp24/pp24s036/firefly/NVTX/c/include/nvtx3/nvtx3.hpp"
 
 using namespace std;
+
+int N, D;
+vector<double> fitness, pop;
+bool done;
+int cur_i, finishes;
+int num_threads;
+pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER, mutex2 = PTHREAD_MUTEX_INITIALIZER;
+void fun2(int i) {
+    if (i == -1)
+        return;
+    fitness[i] = 10 * D;
+    for (int j = 0; j < D; j++) {
+        double x = pop[i * D + j]; // Access the element using linear indexing
+        fitness[i] += x * x - 10 * cos(2 * M_PI * x);
+    }
+    pthread_mutex_lock(&mutex2);
+    finishes++;
+    pthread_mutex_unlock(&mutex2);
+}
+
+int per_job = 4;
+void *find_job(void *args) {
+    int t = *(int *)args;
+    // dynamic find job:
+    int id;
+    while (1) {
+        if (done)
+            break;
+        pthread_mutex_lock(&mutex1);
+        if (cur_i < N) {
+            id = cur_i;
+            cur_i += per_job;
+        } else
+            id = -1;
+        pthread_mutex_unlock(&mutex1);
+        if (id != -1)
+            for (int i = 0; i < per_job && i + id < N; i++)
+                fun2(id + i);
+    }
+    return NULL;
+}
 
 class FA {
   public:
@@ -22,16 +64,16 @@ class FA {
         // nvtxRangePop();
     }
 
-    void fun(const vector<double> &pop, vector<double> &result) {
-        result.assign(N, 10 * D);
+    // void fun(const vector<double> &pop, vector<double> &result) {
+    void fun() {
 
-#pragma omp parallel for collapse(2)
-        for (int i = 0; i < N; i++) {
-            for (int j = 0; j < D; j++) {
-                double x = pop[i * D + j]; // Access the element using linear indexing
-                result[i] += x * x - 10 * cos(2 * M_PI * x);
-            }
+        finishes = cur_i = 0;
+        while (finishes < N) {
+            // cout << "waiting " << finishes << '\n';
+            cerr << "wait\n";
+            ;
         }
+        cerr << "\n";
     }
 
     int D;             // Dimension of problems
@@ -53,9 +95,11 @@ int main() {
     mt19937 gen(0); // rd()
     uniform_real_distribution<> dis(-1024, 1024);
 
-    // FA fa(1024, 128, 5);
+    // FA fa(32, 32, 5);
     FA fa(1024, 512, 3);
-    vector<double> pop(fa.N * fa.D); // 1D array for population
+    N = fa.N, D = fa.D;
+    pop.resize(fa.N * fa.D); // 1D array for population
+    fitness.resize(fa.N);
 
     // Initialize population
     for (int i = 0; i < fa.N; i++) {
@@ -64,8 +108,20 @@ int main() {
         }
     }
 
-    vector<double> fitness;
-    fa.fun(pop, fitness);
+    cpu_set_t cpu_set;
+    sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
+    int num_cpus = CPU_COUNT(&cpu_set);
+    num_threads = num_cpus;
+    per_job = N / (num_threads << 2);
+    pthread_t threads[num_threads];
+    vector<int> a(num_threads);
+    cur_i = finishes = N;
+    for (int i = 0; i < num_threads; i++) {
+        a[i] = i;
+        pthread_create(&threads[i], NULL, find_job, &a[i]);
+    }
+    done = 0;
+    fa.fun();
 
     vector<double> best_list;
     vector<vector<double>> best_para_list;
@@ -92,7 +148,6 @@ int main() {
                 double steps = fa.A * (dis(gen) - 0.5) * abs(fa.Ub[0] - fa.Lb[0]);
                 double r_distance = 0;
 
-                // #pragma omp parallel for
                 for (int k = 0; k < fa.N; k++) {
                     if (fitness[i] > fitness[k]) {
                         r_distance += pow(pop[i * fa.D + j] - pop[k * fa.D + j], 2);
@@ -103,7 +158,8 @@ int main() {
                         pop[i * fa.D + j] = xnew;
 
                         // Update fitness after position update
-                        fa.fun(pop, fitness);
+                        // fitness = fa.fun(pop);
+                        fa.fun();
                         auto best_iter = min_element(fitness.begin(), fitness.end());
                         best_ = *best_iter;
                         int arr_ = distance(fitness.begin(), best_iter);
@@ -118,11 +174,15 @@ int main() {
         best_list.push_back(best_);
         best_para_list.push_back(best_para_);
         it++;
-        // cout << "Iteration " << it << " finished" << endl;
+        cout << "Iteration " << it << " finished" << endl;
+    }
+    done = 1;
+    for (int i = 0; i < num_threads; i++) {
+        pthread_join(threads[i], NULL);
     }
 
     // Save results to file
-    ofstream file("results_1D_omp.csv");
+    ofstream file("results_1D_pthread.csv");
     if (file.is_open()) {
         // Write header
         file << "Dimension_1";
@@ -148,13 +208,13 @@ int main() {
             file << i << "," << best_list[i] << "\n";
         }
         file.close();
-        // cout << "Results saved to results_1D_omp" << endl;
+        cout << "Results saved to results_1D_omp" << endl;
     }
 
     auto end_time = chrono::high_resolution_clock::now();
     chrono::duration<double> elapsed_time = end_time - start_time;
-    // cout << "Program execution time: " << elapsed_time.count() << " seconds" << endl;
-    cout << elapsed_time.count() << endl;
+    cout << "Program execution time: " << elapsed_time.count() << " seconds" << endl;
+    // cout << elapsed_time.count() << endl;
 
     return 0;
 }

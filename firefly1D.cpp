@@ -21,6 +21,7 @@ class FA {
     }
 
     vector<double> fun(const vector<double> &pop) {
+
         vector<double> result(N); // Fitness results for each individual in the population
 
         for (int i = 0; i < N; i++) {
@@ -56,8 +57,8 @@ int main() {
     mt19937 gen(0); // rd()
     uniform_real_distribution<> dis(-1024, 1024);
 
-    // FA fa(256, 32, 5);
-    FA fa(1024, 128, 5);
+    // FA fa(32, 32, 5);
+    FA fa(256, 256, 5);
     vector<double> pop(fa.N * fa.D); // 1D array for population
 
     // Initialize population

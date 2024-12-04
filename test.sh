@@ -26,7 +26,7 @@
 # else
 #     echo -e "\e[91mFailed.\e[0m"
 # fi
-srun -N2 -n1 -c16 ./omp >> record.txt
+srun -n1 -c16 ./omp >> record.txt
 diff results_1D_omp.csv results_1024.csv 
 if [ $? -eq 0 ]; then
     echo -e "\e[92mSucceed.\e[0m"
