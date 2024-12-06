@@ -54,7 +54,7 @@ int main() {
     uniform_real_distribution<> dis(-1024, 1024);
 
     // FA fa(256, 32, 5);
-    FA fa(1024, 128, 5);
+    FA fa(1024, 1024, 3);
     vector<double> pop(fa.N * fa.D); // 1D array for population
 
     // Initialize population
@@ -118,7 +118,7 @@ int main() {
         best_list.push_back(best_);
         best_para_list.push_back(best_para_);
         it++;
-        // cout << "Iteration " << it << " finished" << endl;
+        cout << "Iteration " << it << " finished" << endl;
     }
 
     // Save results to file
