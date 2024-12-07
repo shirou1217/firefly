@@ -4,6 +4,7 @@
 #include <cmath>
 #include <emmintrin.h>
 #include <fstream>
+#include <immintrin.h>
 #include <iostream>
 #include <limits>
 #include <pthread.h>
@@ -16,23 +17,52 @@ using namespace std;
 int N, D;
 vector<double> fitness, pop;
 bool done;
-int cur_i, finishes;
+int cur_i;
+volatile int finishes;
 int num_threads;
 pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER, mutex2 = PTHREAD_MUTEX_INITIALIZER;
-void fun2(int i) {
-    if (i == -1)
-        return;
-    fitness[i] = 10 * D;
-    for (int j = 0; j < D; j++) {
-        double x = pop[i * D + j]; // Access the element using linear indexing
-        fitness[i] += x * x - 10 * cos(2 * M_PI * x);
+const double ten = 10.0;
+const double two_pi = 2.0 * M_PI;
+__m512d vec_ten = _mm512_set1_pd(ten);       // Broadcast 10.0
+__m512d vec_two_pi = _mm512_set1_pd(two_pi); // Broadcast 2 * PI
+void fun3(int start, int end) {
+
+    for (int i = start; i < end; i++) {
+        fitness[i] = 10 * D;
+
+        int j = 0;
+        for (; j + 7 < D; j += 8) {
+            __m512d x = _mm512_loadu_pd(&pop[i * D + j]);
+            __m512d x_squared = _mm512_mul_pd(x, x);
+            __m512d cos_term = _mm512_cos_pd(_mm512_mul_pd(vec_two_pi, x));
+            __m512d result = _mm512_sub_pd(x_squared, _mm512_mul_pd(vec_ten, cos_term));
+            fitness[i] += _mm512_reduce_add_pd(result);
+        }
+
+        // remaining
+        for (; j < D; j++) {
+            double x = pop[i * D + j];
+            fitness[i] += x * x - 10 * cos(2 * M_PI * x);
+        }
     }
     pthread_mutex_lock(&mutex2);
-    finishes++;
+    finishes += end - start;
+    pthread_mutex_unlock(&mutex2);
+}
+void fun2(int start, int end) {
+    for (int i = start; i < end; i++) {
+        fitness[i] = 10 * D;
+        for (int j = 0; j < D; j++) {
+            double x = pop[i * D + j]; // Access the element using linear indexing
+            fitness[i] += x * x - 10 * cos(2 * M_PI * x);
+        }
+    }
+    pthread_mutex_lock(&mutex2);
+    finishes += end - start;
     pthread_mutex_unlock(&mutex2);
 }
 
-int per_job = 4;
+int per_job = 8;
 void *find_job(void *args) {
     int t = *(int *)args;
     // dynamic find job:
@@ -47,9 +77,12 @@ void *find_job(void *args) {
         } else
             id = -1;
         pthread_mutex_unlock(&mutex1);
-        if (id != -1)
-            for (int i = 0; i < per_job && i + id < N; i++)
-                fun2(id + i);
+        if (id != -1) {
+            int endd = id + per_job;
+            if (endd > N)
+                endd = N;
+            fun3(id, endd);
+        }
     }
     return NULL;
 }
@@ -68,12 +101,11 @@ class FA {
     void fun() {
 
         finishes = cur_i = 0;
-        while (finishes < N) {
-            // cout << "waiting " << finishes << '\n';
-            cerr << "wait\n";
-            ;
+        volatile bool ok = 0;
+        while (!ok) {
+            if (finishes >= N)
+                ok = 1;
         }
-        cerr << "\n";
     }
 
     int D;             // Dimension of problems
@@ -96,7 +128,7 @@ int main() {
     uniform_real_distribution<> dis(-1024, 1024);
 
     // FA fa(32, 32, 5);
-    FA fa(1024, 512, 3);
+    FA fa(1024, 1024, 3);
     N = fa.N, D = fa.D;
     pop.resize(fa.N * fa.D); // 1D array for population
     fitness.resize(fa.N);
@@ -112,7 +144,8 @@ int main() {
     sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
     int num_cpus = CPU_COUNT(&cpu_set);
     num_threads = num_cpus;
-    per_job = N / (num_threads << 2);
+    per_job = 8;
+    cout << "per job: " << per_job << endl;
     pthread_t threads[num_threads];
     vector<int> a(num_threads);
     cur_i = finishes = N;
@@ -208,7 +241,7 @@ int main() {
             file << i << "," << best_list[i] << "\n";
         }
         file.close();
-        cout << "Results saved to results_1D_omp" << endl;
+        cout << "Results saved to results_1D_pthread" << endl;
     }
 
     auto end_time = chrono::high_resolution_clock::now();

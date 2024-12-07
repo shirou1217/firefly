@@ -57,8 +57,8 @@ int main() {
     mt19937 gen(0); // rd()
     uniform_real_distribution<> dis(-1024, 1024);
 
-    // FA fa(32, 32, 5);
-    FA fa(256, 256, 5);
+    FA fa(32, 32, 5);
+    // FA fa(256, 256, 5);
     vector<double> pop(fa.N * fa.D); // 1D array for population
 
     // Initialize population
