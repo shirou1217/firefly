@@ -99,11 +99,6 @@ class FA {
 
     // void fun(const vector<double> &pop, vector<double> &result) {
     void fun() {
-        // cout << "start fun\n";
-        if (num_threads == 0) {
-            fun3(0, N);
-            return;
-        }
 
         finishes = cur_i = 0;
         volatile bool ok = 0;
@@ -111,7 +106,6 @@ class FA {
             if (finishes >= N)
                 ok = 1;
         }
-        // cout << "end fun \n";
     }
 
     int D;             // Dimension of problems
@@ -135,7 +129,6 @@ int main() {
 
     // FA fa(32, 32, 5);
     FA fa(1024, 1024, 3);
-    // FA fa(1024, 512, 3);
     N = fa.N, D = fa.D;
     pop.resize(fa.N * fa.D); // 1D array for population
     fitness.resize(fa.N);
@@ -150,11 +143,9 @@ int main() {
     cpu_set_t cpu_set;
     sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
     int num_cpus = CPU_COUNT(&cpu_set);
-    num_threads = num_cpus - 1;
-    // num_threads = min(num_cpus, 20);
-    per_job = (N + num_threads - 1) / max(num_threads, 1);
-    // per_job = 64;
-    // cout << "per job: " << per_job << endl;
+    num_threads = num_cpus;
+    per_job = 8;
+    cout << "per job: " << per_job << endl;
     pthread_t threads[num_threads];
     vector<int> a(num_threads);
     cur_i = finishes = N;
@@ -216,7 +207,7 @@ int main() {
         best_list.push_back(best_);
         best_para_list.push_back(best_para_);
         it++;
-        // cout << "Iteration " << it << " finished" << endl;
+        cout << "Iteration " << it << " finished" << endl;
     }
     done = 1;
     for (int i = 0; i < num_threads; i++) {
@@ -250,13 +241,12 @@ int main() {
             file << i << "," << best_list[i] << "\n";
         }
         file.close();
-        // cout << "Results saved to results_1D_pthread" << endl;
+        cout << "Results saved to results_1D_pthread" << endl;
     }
 
     auto end_time = chrono::high_resolution_clock::now();
     chrono::duration<double> elapsed_time = end_time - start_time;
-    // cout << "Program execution time: " << elapsed_time.count() << " seconds" << endl;
-    cout << num_cpus << ", " << elapsed_time.count() << endl;
+    cout << "Program execution time: " << elapsed_time.count() << " seconds" << endl;
     // cout << elapsed_time.count() << endl;
 
     return 0;

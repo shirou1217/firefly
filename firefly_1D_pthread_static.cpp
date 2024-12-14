@@ -20,12 +20,16 @@ bool done;
 int cur_i;
 volatile int finishes;
 int num_threads;
-pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER, mutex2 = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond_var = PTHREAD_COND_INITIALIZER;
+pthread_cond_t main_cond_var = PTHREAD_COND_INITIALIZER;
+pthread_barrier_t barrier;
 const double ten = 10.0;
 const double two_pi = 2.0 * M_PI;
 __m512d vec_ten = _mm512_set1_pd(ten);       // Broadcast 10.0
 __m512d vec_two_pi = _mm512_set1_pd(two_pi); // Broadcast 2 * PI
 void fun3(int start, int end) {
+    // cout << "fun3 " << start << " " << end << endl;
 
     for (int i = start; i < end; i++) {
         fitness[i] = 10 * D;
@@ -45,45 +49,58 @@ void fun3(int start, int end) {
             fitness[i] += x * x - 10 * cos(2 * M_PI * x);
         }
     }
-    pthread_mutex_lock(&mutex2);
-    finishes += end - start;
-    pthread_mutex_unlock(&mutex2);
-}
-void fun2(int start, int end) {
-    for (int i = start; i < end; i++) {
-        fitness[i] = 10 * D;
-        for (int j = 0; j < D; j++) {
-            double x = pop[i * D + j]; // Access the element using linear indexing
-            fitness[i] += x * x - 10 * cos(2 * M_PI * x);
-        }
-    }
-    pthread_mutex_lock(&mutex2);
-    finishes += end - start;
-    pthread_mutex_unlock(&mutex2);
 }
 
 int per_job = 8;
+bool start_fun, finish_fun;
+int sz, rem;
 void *find_job(void *args) {
     int t = *(int *)args;
-    // dynamic find job:
+    int st, en;
+    if (t < rem) {
+        st = t * (sz + 1);
+        en = st + sz + 1;
+    } else {
+        st = t * sz + rem;
+        en = st + sz;
+    }
+    // cout << t << ": " << st << ' ' << en << endl;
     int id;
+
+    // wait to start to work
     while (1) {
+        pthread_barrier_wait(&barrier);
         if (done)
             break;
+        fun3(st, en);
         pthread_mutex_lock(&mutex1);
-        if (cur_i < N) {
-            id = cur_i;
-            cur_i += per_job;
-        } else
-            id = -1;
+        // cout << t << "end computing\n";
+        finishes += en - st;
+        pthread_cond_signal(&main_cond_var);
         pthread_mutex_unlock(&mutex1);
-        if (id != -1) {
-            int endd = id + per_job;
-            if (endd > N)
-                endd = N;
-            fun3(id, endd);
+
+        /*
+        pthread_mutex_lock(&mutex1);
+        while (!start_fun && !done) {
+            cout << t << " is waiting\n";
+            pthread_cond_wait(&cond_var, &mutex1);
         }
+        if (done) {
+            pthread_mutex_unlock(&mutex1);
+            break;
+        }
+        cout << t << " start computing\n";
+        pthread_mutex_unlock(&mutex1);
+
+        fun3(st, en);
+        pthread_mutex_lock(&mutex1);
+        cout << t << "end computing\n";
+        finishes += en - st;
+        pthread_cond_signal(&main_cond_var);
+        pthread_mutex_unlock(&mutex1);
+        */
     }
+
     return NULL;
 }
 
@@ -99,19 +116,15 @@ class FA {
 
     // void fun(const vector<double> &pop, vector<double> &result) {
     void fun() {
-        // cout << "start fun\n";
-        if (num_threads == 0) {
-            fun3(0, N);
-            return;
-        }
+        pthread_barrier_wait(&barrier);
 
-        finishes = cur_i = 0;
-        volatile bool ok = 0;
-        while (!ok) {
-            if (finishes >= N)
-                ok = 1;
+        pthread_mutex_lock(&mutex1);
+        while (finishes < N) {
+            pthread_cond_wait(&main_cond_var, &mutex1);
         }
-        // cout << "end fun \n";
+        start_fun = 0;
+        finishes = 0;
+        pthread_mutex_unlock(&mutex1);
     }
 
     int D;             // Dimension of problems
@@ -135,7 +148,6 @@ int main() {
 
     // FA fa(32, 32, 5);
     FA fa(1024, 1024, 3);
-    // FA fa(1024, 512, 3);
     N = fa.N, D = fa.D;
     pop.resize(fa.N * fa.D); // 1D array for population
     fitness.resize(fa.N);
@@ -150,19 +162,21 @@ int main() {
     cpu_set_t cpu_set;
     sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
     int num_cpus = CPU_COUNT(&cpu_set);
-    num_threads = num_cpus - 1;
-    // num_threads = min(num_cpus, 20);
-    per_job = (N + num_threads - 1) / max(num_threads, 1);
-    // per_job = 64;
-    // cout << "per job: " << per_job << endl;
+    num_threads = min(num_cpus, N);
+    sz = N / num_threads, rem = N % num_threads;
+    // per_job = 8;
+    per_job = N / num_threads;
+    // cout << "cpu nums: " << num_cpus << endl;
     pthread_t threads[num_threads];
     vector<int> a(num_threads);
-    cur_i = finishes = N;
+    cur_i = finishes = 0;
+    done = 0;
+    start_fun = 0;
+    pthread_barrier_init(&barrier, NULL, num_threads + 1);
     for (int i = 0; i < num_threads; i++) {
         a[i] = i;
         pthread_create(&threads[i], NULL, find_job, &a[i]);
     }
-    done = 0;
     fa.fun();
 
     vector<double> best_list;
@@ -216,9 +230,15 @@ int main() {
         best_list.push_back(best_);
         best_para_list.push_back(best_para_);
         it++;
-        // cout << "Iteration " << it << " finished" << endl;
+        cout << "Iteration " << it << " finished" << endl;
     }
+    cout << "all done\n";
     done = 1;
+    pthread_barrier_wait(&barrier);
+    // pthread_mutex_lock(&mutex1);
+    // done = true;
+    // pthread_cond_broadcast(&cond_var);
+    // pthread_mutex_unlock(&mutex1);
     for (int i = 0; i < num_threads; i++) {
         pthread_join(threads[i], NULL);
     }
@@ -255,7 +275,6 @@ int main() {
 
     auto end_time = chrono::high_resolution_clock::now();
     chrono::duration<double> elapsed_time = end_time - start_time;
-    // cout << "Program execution time: " << elapsed_time.count() << " seconds" << endl;
     cout << num_cpus << ", " << elapsed_time.count() << endl;
     // cout << elapsed_time.count() << endl;
 
