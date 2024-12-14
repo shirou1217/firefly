@@ -3,6 +3,7 @@
 #include <cmath>
 #include <emmintrin.h>
 #include <fstream>
+#include <immintrin.h>
 #include <iostream>
 #include <limits>
 #include <omp.h>
@@ -11,6 +12,13 @@
 // #include "/home/pp24/pp24s036/firefly/NVTX/c/include/nvtx3/nvtx3.hpp"
 
 using namespace std;
+const double ten = 10.0;
+const double two_pi = 2.0 * M_PI;
+__m512d vec_ten = _mm512_set1_pd(ten);
+__m512d vec_two_pi = _mm512_set1_pd(two_pi);
+vector<double> fitness, pop;
+int N, D;
+int num_threads;
 
 class FA {
   public:
@@ -22,14 +30,30 @@ class FA {
         // nvtxRangePop();
     }
 
-    void fun(const vector<double> &pop, vector<double> &result) {
-        result.assign(N, 10 * D);
+    void fun() {
+        fitness.assign(N, 10 * D);
 
 #pragma omp parallel for collapse(2)
         for (int i = 0; i < N; i++) {
             for (int j = 0; j < D; j++) {
-                double x = pop[i * D + j]; // Access the element using linear indexing
-                result[i] += x * x - 10 * cos(2 * M_PI * x);
+                double x = pop[i * D + j];
+                fitness[i] += x * x - 10 * cos(2 * M_PI * x);
+            }
+        }
+    }
+    void fun2() {
+        fitness.assign(N, 10 * D);
+#pragma omp parallel for collapse(2) num_threads(num_threads)
+        for (int i = 0; i < N; i++) {
+            for (int j = 0; j < D; j += 8) {
+                int remaining = D - j;
+                __mmask8 mask = (remaining >= 8) ? 0xFF : (1 << remaining) - 1;
+                __m512d x = _mm512_maskz_loadu_pd(mask, &pop[i * D + j]);
+                __m512d x_squared = _mm512_mul_pd(x, x);
+                __m512d cos_term = _mm512_cos_pd(_mm512_mul_pd(vec_two_pi, x));
+                __m512d result = _mm512_sub_pd(x_squared, _mm512_mul_pd(vec_ten, cos_term));
+#pragma omp atomic
+                fitness[i] += _mm512_mask_reduce_add_pd(mask, result);
             }
         }
     }
@@ -55,7 +79,15 @@ int main() {
 
     // FA fa(256, 32, 5);
     FA fa(1024, 1024, 3);
-    vector<double> pop(fa.N * fa.D); // 1D array for population
+    N = fa.N, D = fa.D;
+    pop.resize(N * D);
+    vector<double> best_list, best_para(D);
+    vector<vector<double>> best_para_list;
+
+    cpu_set_t cpu_set;
+    sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
+    int num_cpus = CPU_COUNT(&cpu_set);
+    num_threads = num_cpus;
 
     // Initialize population
     for (int i = 0; i < fa.N; i++) {
@@ -64,18 +96,14 @@ int main() {
         }
     }
 
-    vector<double> fitness;
-    fa.fun(pop, fitness);
-
-    vector<double> best_list;
-    vector<vector<double>> best_para_list;
+    fa.fun2();
 
     auto min_iter = min_element(fitness.begin(), fitness.end());
     best_list.push_back(*min_iter);
     int arr = distance(fitness.begin(), min_iter);
 
     // Extract the best parameters
-    vector<double> best_para(fa.D);
+    best_para.resize(D);
     for (int j = 0; j < fa.D; j++) {
         best_para[j] = pop[arr * fa.D + j];
     }
@@ -103,7 +131,7 @@ int main() {
                         pop[i * fa.D + j] = xnew;
 
                         // Update fitness after position update
-                        fa.fun(pop, fitness);
+                        fa.fun2();
                         auto best_iter = min_element(fitness.begin(), fitness.end());
                         best_ = *best_iter;
                         int arr_ = distance(fitness.begin(), best_iter);
@@ -118,7 +146,7 @@ int main() {
         best_list.push_back(best_);
         best_para_list.push_back(best_para_);
         it++;
-        cout << "Iteration " << it << " finished" << endl;
+        // cout << "Iteration " << it << " finished" << endl;
     }
 
     // Save results to file
