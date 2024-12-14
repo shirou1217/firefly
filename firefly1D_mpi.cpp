@@ -3,14 +3,22 @@
 #include <cmath>
 #include <emmintrin.h>
 #include <fstream>
+#include <immintrin.h>
 #include <iostream>
 #include <limits>
 #include <mpi.h>
+#include <nvtx3/nvToolsExt.h>
+#include <omp.h>
 #include <random>
 #include <vector>
 // #include "/home/pp24/pp24s036/firefly/NVTX/c/include/nvtx3/nvtx3.hpp"
 
 using namespace std;
+
+const double ten = 10.0;
+const double two_pi = 2.0 * M_PI;
+__m512d vec_ten = _mm512_set1_pd(ten);
+__m512d vec_two_pi = _mm512_set1_pd(two_pi);
 
 class FA {
   public:
@@ -36,16 +44,29 @@ class FA {
         if (size == 1) {
             for (int i = 0; i < N; i++) {
                 result[i] = 10 * D;
-                for (int j = 0; j < D; j++) {
-                    double x = pop[i * D + j]; // Access the element using linear indexing
-                    result[i] += x * x - 10 * cos(2 * M_PI * x);
+                for (int j = 0; j < D; j += 8) {
+                    int remaining = D - j;
+                    __mmask8 mask = (remaining >= 8) ? 0xFF : (1 << remaining) - 1;
+                    __m512d x = _mm512_maskz_loadu_pd(mask, &pop[i * D + j]);
+                    __m512d x_squared = _mm512_mul_pd(x, x);
+                    __m512d cos_term = _mm512_cos_pd(_mm512_mul_pd(vec_two_pi, x));
+                    __m512d res = _mm512_sub_pd(x_squared, _mm512_mul_pd(vec_ten, cos_term));
+                    result[i] += _mm512_mask_reduce_add_pd(mask, res);
                 }
             }
             return;
         }
         if (rank == 0) {
+#ifdef PROFILING
+            nvtxRangePush("wake up slaves");
+#endif
             MPI_Request request;
             MPI_Ibcast(&rank, 1, MPI_INT, 0, MPI_COMM_WORLD, &request);
+#ifdef PROFILING
+            nvtxRangePop();
+
+            nvtxRangePush("sending data");
+#endif
             // MPI_Bcast(&rank, 1, MPI_INT, 0, MPI_COMM_WORLD);
             for (int i = 1; i < size; ++i) {
                 int start = st[i];
@@ -55,7 +76,11 @@ class FA {
             }
             MPI_Wait(&request, MPI_STATUS_IGNORE);
             MPI_Waitall(size - 1, req_send.data(), MPI_STATUSES_IGNORE);
+#ifdef PROFILING
+            nvtxRangePop();
 
+            nvtxRangePush("waiting result");
+#endif
             for (int i = 1; i < size; ++i) {
                 int start = st[i];
                 int end = en[i];
@@ -63,22 +88,45 @@ class FA {
                 MPI_Irecv(result + start, end - start, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &req_recv[i - 1]);
             }
             MPI_Waitall(size - 1, req_recv.data(), MPI_STATUSES_IGNORE);
+
+#ifdef PROFILING
+            nvtxRangePop();
+#endif
         } else {
             int start = st[rank];
             int end = en[rank];
+#ifdef PROFILING
+            nvtxRangePush("wait for data");
+#endif
             // MPI_Recv(pop + start * D, (end - start) * D, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, 0);
             MPI_Irecv(pop + start * D, (end - start) * D, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &req_recv[0]);
             MPI_Wait(&req_recv[0], MPI_STATUS_IGNORE);
+#ifdef PROFILING
+            nvtxRangePop();
 
+            nvtxRangePush("computing");
+#endif
             for (int i = start; i < end; ++i) {
                 result[i] = 10 * D;
-                for (int j = 0; j < D; ++j) {
-                    double x = pop[i * D + j];
-                    result[i] += x * x - 10 * cos(2 * M_PI * x);
+                for (int j = 0; j < D; j += 8) {
+                    int remaining = D - j;
+                    __mmask8 mask = (remaining >= 8) ? 0xFF : (1 << remaining) - 1;
+                    __m512d x = _mm512_maskz_loadu_pd(mask, &pop[i * D + j]);
+                    __m512d x_squared = _mm512_mul_pd(x, x);
+                    __m512d cos_term = _mm512_cos_pd(_mm512_mul_pd(vec_two_pi, x));
+                    __m512d res = _mm512_sub_pd(x_squared, _mm512_mul_pd(vec_ten, cos_term));
+                    result[i] += _mm512_mask_reduce_add_pd(mask, res);
                 }
             }
+#ifdef PROFILING
+            nvtxRangePop();
 
+            nvtxRangePush("send result back");
+#endif
             MPI_Send(result + start, end - start, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+#ifdef PROFILING
+            nvtxRangePop();
+#endif
         }
     }
 
@@ -103,7 +151,9 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     int dimen, population, max_iter;
-    FA fa(1024, 128, 5, size);
+    // FA fa(256, 256, 5, size);
+    // FA fa(1024, 1024, 3, size);
+    FA fa(1024, 512, 8, size);
     double *pop, *fitness;
     int N = fa.N, D = fa.D;
     pop = (double *)malloc(N * D * sizeof(double));
@@ -156,6 +206,9 @@ int main(int argc, char **argv) {
         vector<double> best_para_(fa.D);
 
         int it = 1;
+#ifdef PROFILING
+        nvtxRangePush("computing");
+#endif
         while (it < fa.it) {
             for (int i = 0; i < 10; i++) {
                 for (int j = 0; j < fa.D; j++) {
@@ -165,16 +218,27 @@ int main(int argc, char **argv) {
                     // #pragma omp parallel for
                     for (int k = 0; k < fa.N; k++) {
                         if (fitness[i] > fitness[k]) {
+#ifdef PROFILING
+                            nvtxRangePush("compute before fun");
+#endif
                             r_distance += pow(pop[i * fa.D + j] - pop[k * fa.D + j], 2);
                             double Beta = fa.B * exp(-fa.G * r_distance);
                             double xnew = pop[i * fa.D + j] + Beta * (pop[k * fa.D + j] - pop[i * fa.D + j]) + steps;
 
                             xnew = min(max(xnew, fa.Lb[0]), fa.Ub[0]);
                             pop[i * fa.D + j] = xnew;
+#ifdef PROFILING
+                            nvtxRangePop();
 
                             // Update fitness after position update
+                            nvtxRangePush("calculating fun");
+#endif
                             fa.fun(pop, fitness, size, rank);
+#ifdef PROFILING
+                            nvtxRangePop();
 
+                            nvtxRangePush("compute after fun");
+#endif
                             int best_iter = min_element(fitness, fitness + N) - fitness;
                             best_ = fitness[best_iter];
                             int arr_ = distance(fitness, fitness + best_iter);
@@ -182,6 +246,9 @@ int main(int argc, char **argv) {
                             for (int j = 0; j < fa.D; j++) {
                                 best_para_[j] = pop[arr_ * fa.D + j];
                             }
+#ifdef PROFILING
+                            nvtxRangePop();
+#endif
                         }
                     }
                 }
@@ -191,12 +258,25 @@ int main(int argc, char **argv) {
             it++;
             // cout << "Iteration " << it << " finished" << endl;
         }
+#ifdef PROFILING
+        nvtxRangePop();
+#endif
+
         int tmp = -1;
         // MPI_Bcast(&tmp, 1, MPI_INT, 0, MPI_COMM_WORLD);
+#ifdef PROFILING
+        nvtxRangePush("stop slaves");
+#endif
         MPI_Request request;
         MPI_Ibcast(&tmp, 1, MPI_INT, 0, MPI_COMM_WORLD, &request);
         MPI_Wait(&request, MPI_STATUS_IGNORE);
+#ifdef PROFILING
+        nvtxRangePop();
+#endif
 
+#ifdef PROFILING
+        nvtxRangePush("writing file");
+#endif
         // Save results to file
         string file_name = "results_1D_mpi.csv";
         ofstream file(file_name);
@@ -227,6 +307,9 @@ int main(int argc, char **argv) {
             file.close();
             // cout << "Results saved to " << file_name << endl;
         }
+#ifdef PROFILING
+        nvtxRangePop();
+#endif
     }
     MPI_Finalize();
     if (rank == 0) {
